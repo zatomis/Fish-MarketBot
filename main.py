@@ -4,13 +4,9 @@ import requests
 from environs import Env
 import redis
 from functools import partial
-from telegram.ext import Filters, Updater
-from telegram.ext import CallbackQueryHandler, CommandHandler, MessageHandler
 import logging
-import save_image_to_dir as save
-
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
-from telegram.ext import Updater, CommandHandler, CallbackQueryHandler, CallbackContext
+from telegram.ext import Filters, Updater, CommandHandler, CallbackQueryHandler, CallbackContext, MessageHandler
 
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO
@@ -24,7 +20,7 @@ strapi_token = ''
 
 def get_products(token, product_id='', getimage=False):
     headers = {'Authorization': f'Bearer {token}'}
-    url='http://localhost:1337/api/Products/'+product_id
+    url = 'http://localhost:1337/api/Products/'+product_id
     params = {}
     if getimage:
         params = {'populate': 'Picture'}
@@ -32,12 +28,8 @@ def get_products(token, product_id='', getimage=False):
     response.raise_for_status()
     return response.json()
 
-def start(update: Update, context: CallbackContext) -> None:
-    """
-    Хэндлер для состояния START.
-    Бот отвечает пользователю фразой "Привет!" и переводит его в состояние ECHO.
-    Теперь в ответ на его команды будет запускаеться хэндлер echo.
-    """
+
+def main_menu():
     global strapi_token
     products = get_products(strapi_token)
     buttons = []
@@ -45,35 +37,62 @@ def start(update: Update, context: CallbackContext) -> None:
         buttons.append(
             [InlineKeyboardButton(text=product['attributes']['Title'], callback_data=product['id'])]
         )
-    reply_markup = InlineKeyboardMarkup(buttons)
-    update.message.reply_text('Привет!', reply_markup=reply_markup)
+    return InlineKeyboardMarkup(buttons)
+
+
+def start(update: Update, context: CallbackContext):
+    """
+    Хэндлер для состояния START.
+    Бот отвечает пользователю фразой "Привет!" и переводит его другое в состояние.
+    Теперь в ответ на его команды будет запускаеться другой хэндлер.
+    """
+    update.message.reply_text('Список товаров!', reply_markup=main_menu())
+    logger.info(update.message.message_id)
     return "HANDLE_MENU"
 
 
-def button(update: Update, context: CallbackContext) -> None:
+def back_button(update: Update, context: CallbackContext) -> None:
+    query = update.callback_query
+    query.answer()
+    query.bot.deleteMessage(update.callback_query.from_user.id, update.callback_query.message.message_id)
+    query.bot.send_message(update.callback_query.from_user.id, 'Список товаров!', reply_markup=main_menu())
+    return "HANDLE_MENU"
+
+
+def product_button(update: Update, context: CallbackContext) -> None:
     """Parses the CallbackQuery and updates the message text."""
     query = update.callback_query
     # CallbackQueries need to be answered, even if no notification to the user is needed
     # Some clients may have trouble otherwise. See https://core.telegram.org/bots/api#callbackquery
-    # query.answer()
+    query.answer()
+    # query.bot.deleteMessage(update.callback_query.from_user.id, update.callback_query.message)
     try:
         global strapi_token
         product_title = get_products(strapi_token, query.data, getimage=True)
         picture_url = 'http://localhost:1337' + product_title['data']['attributes']['Picture']['data'][0]['attributes'][
             'url']
+        description = product_title['data']['attributes']['Description']
         response = requests.get(picture_url)
         image_data = BytesIO(response.content)
-        context.bot.deleteMessage(update.callback_query.from_user.id, update.callback_query.message.message_id-1)
-        context.bot.send_photo(update.callback_query.from_user.id, image_data)
-    except URLError as error:
+        button_back = InlineKeyboardButton('Назад', callback_data='0')
+        keyboard = InlineKeyboardMarkup(
+            inline_keyboard=[
+                [button_back, ]
+            ])
+        query.bot.deleteMessage(update.callback_query.from_user.id, update.callback_query.message.message_id)
+        query.bot.send_photo(update.callback_query.from_user.id, image_data,
+                             caption=f"Описание товара:\n{description}", reply_markup=keyboard)
+        return "HANDLE_DESCRIPTION"
+    except URLError:
         update.callback_query.message.reply_text('Нет фото')
-    except IndexError as error:
+        return "START"
+    except IndexError:
         update.callback_query.message.reply_text('Нет фото')
+        return "START"
+    # except IndexError as error:
+    #     update.callback_query.message.reply_text('Нет фото')
+    #     return "START"
 
-    
-    query.edit_message_text(text=f"{product_title['data']['attributes']['Description']}\nSelected option: {query.data}")
-    update.callback_query.message.reply_text('Нажми\n/start')
-    return "ECHO"
 
 def echo(update, context):
     """
@@ -116,7 +135,8 @@ def handle_users_reply(update, context, host, port):
 
     states_functions = {
         'START': start,
-        'HANDLE_MENU': button,
+        'HANDLE_MENU': product_button,
+        'HANDLE_DESCRIPTION': back_button,
         'ECHO': echo
     }
     state_handler = states_functions[user_state]
@@ -125,6 +145,7 @@ def handle_users_reply(update, context, host, port):
     # Этот фрагмент можно переписать.
     try:
         next_state = state_handler(update, context)
+        logger.info("next_state "+next_state)
         db.set(chat_id, next_state)
     except Exception as err:
         print(err)
