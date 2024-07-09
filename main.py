@@ -30,6 +30,16 @@ def get_products(token, product_id='', getimage=False):
 
 
 def main_menu():
+    keyboard = [
+        [InlineKeyboardButton("Список товаров", callback_data="product_list")],
+        [InlineKeyboardButton("Моя корзина", callback_data="my_cart")],
+        [InlineKeyboardButton("Очистить корзину", callback_data="clear_cart")],
+    ]
+    return InlineKeyboardMarkup(keyboard)
+
+
+
+def products_menu():
     global strapi_token
     products = get_products(strapi_token)
     buttons = []
@@ -46,17 +56,39 @@ def start(update: Update, context: CallbackContext):
     Бот отвечает пользователю фразой "Привет!" и переводит его другое в состояние.
     Теперь в ответ на его команды будет запускаеться другой хэндлер.
     """
-    update.message.reply_text('Список товаров!', reply_markup=main_menu())
+    update.message.reply_text('Бот Магазин - "Рыба Моя"🐟', reply_markup=main_menu())
     logger.info(update.message.message_id)
-    return "HANDLE_MENU"
+    return "START_MENU"
 
 
-def back_button(update: Update, context: CallbackContext) -> None:
+def product_choise_button(update: Update, context: CallbackContext) -> None:
     query = update.callback_query
     query.answer()
-    query.bot.deleteMessage(update.callback_query.from_user.id, update.callback_query.message.message_id)
-    query.bot.send_message(update.callback_query.from_user.id, 'Список товаров!', reply_markup=main_menu())
-    return "HANDLE_MENU"
+    match query.data:
+        case 'back':
+            query.bot.deleteMessage(update.callback_query.from_user.id, update.callback_query.message.message_id)
+            query.bot.send_message(update.callback_query.from_user.id, 'Список товаров!', reply_markup=products_menu())
+            return "HANDLE_MENU"
+        case 'main_menu':
+            query.bot.deleteMessage(update.callback_query.from_user.id, update.callback_query.message.message_id)
+            query.bot.send_message(update.callback_query.from_user.id, 'Главное меню', reply_markup=main_menu())
+            return "START_MENU"
+        case 'add_cart':
+            pass
+
+
+def main_menu_button(update: Update, context: CallbackContext) -> None:
+    query = update.callback_query
+    query.answer()
+    match query.data:
+        case 'product_list':
+            query.bot.deleteMessage(update.callback_query.from_user.id, update.callback_query.message.message_id)
+            query.bot.send_message(update.callback_query.from_user.id, 'Список товаров!', reply_markup=products_menu())
+            return "HANDLE_MENU"
+        case 'my_cart':
+            pass
+        case 'clear_cart':
+            pass
 
 
 def product_button(update: Update, context: CallbackContext) -> None:
@@ -74,14 +106,19 @@ def product_button(update: Update, context: CallbackContext) -> None:
         description = product_title['data']['attributes']['Description']
         response = requests.get(picture_url)
         image_data = BytesIO(response.content)
-        button_back = InlineKeyboardButton('Назад', callback_data='0')
-        keyboard = InlineKeyboardMarkup(
-            inline_keyboard=[
-                [button_back, ]
-            ])
+        keyboard = [
+            [
+                InlineKeyboardButton("Назад", callback_data="back"),
+                InlineKeyboardButton("В корзину", callback_data="add_cart"),
+            ],
+            [InlineKeyboardButton("Главное меню", callback_data="main_menu")],
+        ]
+
         query.bot.deleteMessage(update.callback_query.from_user.id, update.callback_query.message.message_id)
         query.bot.send_photo(update.callback_query.from_user.id, image_data,
-                             caption=f"Описание товара:\n{description}", reply_markup=keyboard)
+                             caption=f"Описание товара:\n{description}", reply_markup=InlineKeyboardMarkup(keyboard))
+        logger.error(query.data)
+
         return "HANDLE_DESCRIPTION"
     except URLError:
         update.callback_query.message.reply_text('Нет фото')
@@ -136,7 +173,8 @@ def handle_users_reply(update, context, host, port):
     states_functions = {
         'START': start,
         'HANDLE_MENU': product_button,
-        'HANDLE_DESCRIPTION': back_button,
+        'START_MENU': main_menu_button,
+        'HANDLE_DESCRIPTION': product_choise_button,
         'ECHO': echo
     }
     state_handler = states_functions[user_state]
