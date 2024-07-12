@@ -7,7 +7,7 @@ from functools import partial
 import logging
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import Filters, Updater, CommandHandler, CallbackQueryHandler, CallbackContext, MessageHandler
-import json
+import re
 
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO
@@ -17,6 +17,15 @@ logger = logging.getLogger(__name__)
 
 _database = None
 strapi_token = ''
+
+def delete_order_item(item_id):
+    # удалить позицию из заказа
+    global strapi_token
+    headers = {'Authorization': f'Bearer {strapi_token}'}
+    url = f"http://localhost:1337/api/user-orders/{item_id}"
+    response = requests.delete(url, headers=headers)
+    response.raise_for_status()
+
 
 def get_host_port(value_host_port=''):
     host = value_host_port.get(list(value_host_port)[0])
@@ -51,9 +60,12 @@ def products_menu():
     buttons = []
     for product in products['data']:
         buttons.append(
-            [InlineKeyboardButton(text=product['attributes']['Title'], callback_data=product['id'])]
+            [
+                InlineKeyboardButton(text=product['attributes']['Title'], callback_data=product['id']),
+                InlineKeyboardButton(text=str(product['attributes']['Price'])+"💰", callback_data=product['id'])
+            ]
         )
-
+    buttons.append([InlineKeyboardButton(text="⬅️ назад", callback_data='0')])
     return InlineKeyboardMarkup(buttons)
 
 
@@ -85,6 +97,16 @@ def start(update: Update, context: CallbackContext):
 # # a['meta']['pagination']['total'] = 0
 
 
+def cart_choise_yes_no_button(update: Update, context: CallbackContext) -> None:
+    query = update.callback_query
+    query.answer()
+    if int(query.data) > 0:
+        delete_order_item(query.data)
+    query.bot.deleteMessage(update.callback_query.from_user.id, update.callback_query.message.message_id)
+    query.bot.send_message(update.callback_query.from_user.id, f'Бот Магазин - "Рыба Моя"🐟', reply_markup=main_menu())
+    return "START_MENU"
+
+
 def product_choise_button(update: Update, context: CallbackContext) -> None:
     query = update.callback_query
     query.answer()
@@ -107,20 +129,35 @@ def process_orders(update: Update, context: CallbackContext) -> None:
     query = update.callback_query
     query.answer()
     if int(query.data) > 0:
-        # удалить позицию из заказа
+        keyboard = [
+            [
+                InlineKeyboardButton("Да", callback_data=query.data),
+                InlineKeyboardButton("Нет", callback_data="0"),
+            ],
+        ]
         global strapi_token
         headers = {'Authorization': f'Bearer {strapi_token}'}
-        response = requests.delete(f'http://localhost:1337/api/user-orders/{query.data}')
+        params = {'populate': 'product'}
+        url = f'http://localhost:1337/api/user-orders/{query.data}'
+        response = requests.get(url, headers=headers, params=params)
         response.raise_for_status()
+        user_order = response.json()
+        reply_markup = InlineKeyboardMarkup(keyboard)
         query.bot.deleteMessage(update.callback_query.from_user.id, update.callback_query.message.message_id)
-        query.bot.send_message(update.callback_query.from_user.id, f'Бот Магазин - "Рыба Моя"🐟', reply_markup=main_menu())
-        return "START_MENU"
+        query.bot.send_message(update.callback_query.from_user.id, f"Вы хотите удалить позицию:\n{user_order['data']['attributes']['product']['data']['attributes']['Title']} в кол-ве {user_order['data']['attributes']['quantity']}", reply_markup=reply_markup)
+        return "CART_MENU_CHOISE"
     else:
         match query.data:
             case '0':
+            # создать новую и добавить связи
                 pass
+
             case '-1':
-                pass
+                query.bot.deleteMessage(update.callback_query.from_user.id, update.callback_query.message.message_id)
+                query.bot.send_message(update.callback_query.from_user.id, f'Бот Магазин - "Рыба Моя"🐟',
+                                       reply_markup=main_menu())
+                return "START_MENU"
+
 
 def main_menu_button(update: Update, context: CallbackContext) -> None:
     query = update.callback_query
@@ -165,16 +202,20 @@ def main_menu_button(update: Update, context: CallbackContext) -> None:
             return "START_MENU"
 
         case 'clear_cart':
-            # # global strapi_token
-            # headers = {'Authorization': f'Bearer {strapi_token}'}
-            # params = {'data': {'cart_id': f"{update.callback_query.from_user.id}", 'user_orders': [10, 11]}}
-            # response = requests.post('http://localhost:1337/api/carts/',
-            #                          headers=headers, json=params)
-            # response.raise_for_status()
-            # new_cart = json.loads(response.text)['data']['id']
-
-
-            return "HANDLE_DESCRIPTION"
+            headers = {'Authorization': f'Bearer {strapi_token}'}
+            params = {
+                    'populate': 'product',
+                    'filters[user_id]][$eq]': update.callback_query.from_user.id,
+                     }
+            response = requests.get('http://localhost:1337/api/user-orders/',
+                                     headers=headers, params=params)
+            response.raise_for_status()
+            user_orders = response.json()['data']
+            if user_orders:
+                for order in user_orders:
+                    delete_order_item(order['id'])
+                query.bot.send_message(update.callback_query.from_user.id, f'Корзина пуста 🤷')
+            return "START_MENU"
 
 
 def product_button(update: Update, context: CallbackContext) -> None:
@@ -185,28 +226,34 @@ def product_button(update: Update, context: CallbackContext) -> None:
     query.answer()
     # query.bot.deleteMessage(update.callback_query.from_user.id, update.callback_query.message)
     try:
-        global strapi_token
-        product_title = get_products(strapi_token, query.data, getimage=True)
-        picture_url = 'http://localhost:1337' + product_title['data']['attributes']['Picture']['data'][0]['attributes'][
-            'url']
-        description = product_title['data']['attributes']['Description']
-        response = requests.get(picture_url)
-        image_data = BytesIO(response.content)
-        keyboard = [
-            [
-                InlineKeyboardButton("Назад", callback_data="back"),
-                InlineKeyboardButton("В корзину", callback_data="add_cart"),
-            ],
-            [InlineKeyboardButton("Главное меню", callback_data="main_menu")],
-        ]
+        if query.data == '0':
+            query.bot.deleteMessage(update.callback_query.from_user.id, update.callback_query.message.message_id)
+            query.bot.send_message(update.callback_query.from_user.id, f'Бот Магазин - "Рыба Моя"🐟',
+                                   reply_markup=main_menu())
+            return "START_MENU"
+        else:
+            global strapi_token
+            product_title = get_products(strapi_token, query.data, getimage=True)
+            picture_url = 'http://localhost:1337' + product_title['data']['attributes']['Picture']['data'][0]['attributes'][
+                'url']
+            description = product_title['data']['attributes']['Description']
+            response = requests.get(picture_url)
+            image_data = BytesIO(response.content)
+            keyboard = [
+                [
+                    InlineKeyboardButton("Назад", callback_data="back"),
+                    InlineKeyboardButton("В корзину", callback_data="add_cart"),
+                ],
+                [InlineKeyboardButton("Главное меню", callback_data="main_menu")],
+            ]
 
-        query.bot.deleteMessage(update.callback_query.from_user.id, update.callback_query.message.message_id)
-        query.bot.send_photo(update.callback_query.from_user.id, image_data,
-                             caption=f"Описание товара:\n{description}", reply_markup=InlineKeyboardMarkup(keyboard))
-        host, port = get_host_port(context.user_data)
-        db = get_database_connection(host, port)
-        db.set(str(update.callback_query.from_user.id)*2, query.data)
-        return "HANDLE_DESCRIPTION"
+            query.bot.deleteMessage(update.callback_query.from_user.id, update.callback_query.message.message_id)
+            query.bot.send_photo(update.callback_query.from_user.id, image_data,
+                                 caption=f"Описание товара:\n{description}", reply_markup=InlineKeyboardMarkup(keyboard))
+            host, port = get_host_port(context.user_data)
+            db = get_database_connection(host, port)
+            db.set(str(update.callback_query.from_user.id)*2, query.data)
+            return "HANDLE_DESCRIPTION"
     except URLError:
         update.callback_query.message.reply_text('Нет фото')
         return "START"
@@ -220,26 +267,32 @@ def product_button(update: Update, context: CallbackContext) -> None:
 
 def indicate_weight(update, context):
     global strapi_token
+    tmpl = '^[1-9][0-9]*$'
     users_reply = update.message.text
-    host, port = get_host_port(context.user_data)
-    db = get_database_connection(host, port)
-    product_id = db.get(str(update.message.from_user.id)*2).decode("utf-8")
-    update.message.reply_text(f"{users_reply}\nHost {host}\nPort {port}\n{product_id}")
-    try:
-        headers = {'Authorization': f'Bearer {strapi_token}'}
-        params = {
-            'data': {
-                'product': product_id,
-                'quantity': users_reply,
-                'user_id':  f"{update.message.from_user.id}",
+    if re.match(tmpl, users_reply) is not None:
+        host, port = get_host_port(context.user_data)
+        db = get_database_connection(host, port)
+        product_id = db.get(str(update.message.from_user.id) * 2).decode("utf-8")
+        try:
+            headers = {'Authorization': f'Bearer {strapi_token}'}
+            params = {
+                'data': {
+                    'product': product_id,
+                    'quantity': users_reply,
+                    'user_id': f"{update.message.from_user.id}",
+                }
             }
-        }
-        response = requests.post('http://localhost:1337/api/user-orders/',
-                                 headers=headers, json=params)
-        response.raise_for_status()
-        return "HANDLE_DESCRIPTION"
-    except Exception as err:
-        return "START"
+            response = requests.post('http://localhost:1337/api/user-orders/',
+                                     headers=headers, json=params)
+            response.raise_for_status()
+            update.message.reply_text("Позиция добавлена в корзину☑️\n👆Используйте меню выше для продолжения")
+            return "HANDLE_DESCRIPTION"
+        except Exception as err:
+            return "START"
+    else:
+        update.message.reply_text("Не верно указан вес!")
+        return "ECHO"
+
 
 def handle_users_reply(update, context, host, port):
     """
@@ -275,6 +328,7 @@ def handle_users_reply(update, context, host, port):
         'START_MENU': main_menu_button,
         'HANDLE_DESCRIPTION': product_choise_button,
         'HANDLE_USER_ORDER': process_orders,
+        'CART_MENU_CHOISE': cart_choise_yes_no_button,
         'ECHO': indicate_weight
     }
     state_handler = states_functions[user_state]
