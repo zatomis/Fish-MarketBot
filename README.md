@@ -34,6 +34,7 @@ pip install -r requirements.txt
 и запишите данные в формате: `ПЕРЕМЕННАЯ=значение`.
 Доступны следующие переменные:
 - STRAPI_TOKEN - ваш Strapi ключ
+- STRAPI_URL - адрес Strapi сервиса
 - TELEGRAM_TOKEN - ваш телеграм токен
 - REDIS_HOST - ваш Redis адрес
 - REDIS_PORT - ваш Redis порт 
