@@ -10,18 +10,11 @@ import logging
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import Filters, Updater, CommandHandler, CallbackQueryHandler, CallbackContext, MessageHandler
 import re
-from strapi_features import delete_order_item, clear_user_orders, change_user_orders, delete_cart_by_id, get_products
+from strapi_features import delete_order_item, clear_user_orders, change_user_orders, delete_cart_by_id, get_products, \
+    create_user_contact, get_user_order, create_user_order_item, get_cart_id, update_cart, get_user_cart
 
 logger = logging.getLogger(__name__)
 _database = None
-strapi_token = ''
-strapi_url = 'http://localhost:1337'
-
-
-def get_host_port(value_host_port=''):
-    host = value_host_port.get(list(value_host_port)[0])
-    port = list(value_host_port)[0]
-    return host, port
 
 
 def get_main_menu():
@@ -55,10 +48,11 @@ def start(update: Update, context: CallbackContext):
 
 
 def get_user_phone(update: Update, context: CallbackContext) -> None:
-    host, port = get_host_port(context.user_data)
+    host = context.bot_data['host']
+    port = context.bot_data['port']
     db = get_database_connection(host, port)
     phone = update.message.text
-    cart_id = db.get(f"{update.message.from_user.id}-2").decode("utf-8")
+    cart_id = db.get(f"CARTID{update.message.from_user.id}").decode("utf-8")
     user_mail = db.get(f"{update.message.from_user.id}-3").decode("utf-8")
     if phone.lower() == "отмена":
         update.message.reply_text(f'Бот Магазин - "Рыба Моя"🐟', reply_markup=get_main_menu())
@@ -73,18 +67,8 @@ def get_user_phone(update: Update, context: CallbackContext) -> None:
                    f"Ваш номер телефона {phone}\n" \
                    f"Почта {user_mail}"
             change_user_orders(strapi_url, strapi_token, update.message.from_user.id, cart_id)
-            headers = {'Authorization': f'Bearer {strapi_token}'}
-            params = {
-                'data': {
-                    'Mail': user_mail,
-                    'Phone': phone,
-                    'carts': cart_id,
-                    'Full_name': f"{update.message.from_user.full_name} {update.message.from_user.first_name}",
-                }
-            }
-            response = requests.post(f'{strapi_url}/api/contacts/',
-                                     headers=headers, json=params)
-            response.raise_for_status()
+            create_user_contact(strapi_url, strapi_token, user_mail, phone, cart_id,
+                                update.message.from_user.full_name, update.message.from_user.first_name)
             update.message.reply_text(f'Бот Магазин - "Рыба Моя"🐟\n{info}', reply_markup=get_main_menu())
             return "START_MENU"
 
@@ -94,12 +78,13 @@ def get_user_phone(update: Update, context: CallbackContext) -> None:
 
 
 def get_user_mail(update: Update, context: CallbackContext) -> None:
-    host, port = get_host_port(context.user_data)
+    host = context.bot_data['host']
+    port = context.bot_data['port']
     db = get_database_connection(host, port)
     address = update.message.text
     if address.lower() == "отмена":
         update.message.reply_text(f'Бот Магазин - "Рыба Моя"🐟', reply_markup=get_main_menu())
-        cart_id = db.get(f"{update.message.from_user.id}-2").decode("utf-8")
+        cart_id = db.get(f"CARTID{update.message.from_user.id}").decode("utf-8")
         delete_cart_by_id(strapi_url, strapi_token, cart_id)
         return "START_MENU"
     else:
@@ -152,11 +137,7 @@ def process_orders(update: Update, context: CallbackContext) -> None:
                 InlineKeyboardButton("Нет", callback_data="0"),
             ],
         ]
-        headers = {'Authorization': f'Bearer {strapi_token}'}
-        params = {'populate': 'product'}
-        response = requests.get(f'{strapi_url}/api/user-orders/{query.data}', headers=headers, params=params)
-        response.raise_for_status()
-        user_order = response.json()
+        user_order = get_user_order(strapi_url, strapi_token, query.data, 0, False)
         reply_markup = InlineKeyboardMarkup(keyboard)
         query.bot.send_message(update.callback_query.from_user.id,
                                f"Вы хотите удалить позицию:\n"
@@ -168,25 +149,8 @@ def process_orders(update: Update, context: CallbackContext) -> None:
     else:
         match query.data:
             case '0':
-                headers = {'Authorization': f'Bearer {strapi_token}'}
-                params = {
-                    'data': {
-                        'populate': 'User_orders',
-                        'cart_id': f"{update.callback_query.message.from_user.id}",
-                    }
-                }
-                response = requests.post(f'{strapi_url}/api/carts/',
-                                         headers=headers, json=params)
-                response.raise_for_status()
-                cart_id = response.json()['data']['id']
-                logger.info(cart_id)
-                params = {
-                        'populate': 'product',
-                        'filters[user_id]][$eq]': update.callback_query.from_user.id,
-                         }
-                response = requests.get(f'{strapi_url}/api/user-orders/', headers=headers, params=params)
-                response.raise_for_status()
-                orders = response.json()['data']
+                cart_id = get_cart_id(strapi_url, strapi_token, update.callback_query.message.from_user.id)
+                orders = get_user_order(strapi_url, strapi_token, 0, update.callback_query.from_user.id, True)
                 user_orders = []
                 if orders:
                     for order in orders:
@@ -199,12 +163,11 @@ def process_orders(update: Update, context: CallbackContext) -> None:
                             'user_orders': orders
                         }
                     }
-                    response = requests.put(f'{strapi_url}/api/carts/{cart_id}', headers=headers, json=data)
-                    response.raise_for_status()
-                    host, port = get_host_port(context.user_data)
+                    update_cart(strapi_url, strapi_token, cart_id, data)
+                    host = context.bot_data['host']
+                    port = context.bot_data['port']
                     db = get_database_connection(host, port)
-                    db.set(f"{update.callback_query.from_user.id}-1", update.callback_query.from_user.id)
-                    db.set(f"{update.callback_query.from_user.id}-2", cart_id)
+                    db.set(f"CARTID{update.callback_query.from_user.id}", cart_id)
                     query.bot.send_message(update.callback_query.from_user.id, 'Укажите ваш Email 📩')
                     return "GET_MAIL"
                 else:
@@ -212,7 +175,7 @@ def process_orders(update: Update, context: CallbackContext) -> None:
                                            f'Бот Магазин - "Рыба Моя"🐟\nДобавьте товары в корзину‼️',
                                            reply_markup=get_main_menu())
                     query.bot.delete_message(update.callback_query.from_user.id,
-                                            update.callback_query.message.message_id)
+                                             update.callback_query.message.message_id)
                     return "START_MENU"
             case '-1':
                 query.bot.send_message(update.callback_query.from_user.id, f'Бот Магазин - "Рыба Моя"🐟',
@@ -231,15 +194,8 @@ def get_main_menu_button(update: Update, context: CallbackContext) -> None:
             return "HANDLE_MENU"
         case 'my_cart':
             query.bot.delete_message(update.callback_query.from_user.id, update.callback_query.message.message_id)
-            headers = {'Authorization': f'Bearer {strapi_token}'}
-            params = {
-                    'populate': 'product',
-                    'filters[user_id]][$eq]': update.callback_query.from_user.id,
-                     }
-            response = requests.get(f'{strapi_url}/api/user-orders/',
-                                     headers=headers, params=params)
-            response.raise_for_status()
-            orders = response.json()['data']
+            orders = get_user_cart(strapi_url, strapi_token, update.callback_query.from_user.id)
+
             if orders:
                 buttons = []
                 order_price = 0
@@ -306,9 +262,10 @@ def get_product_button(update: Update, context: CallbackContext) -> None:
                                  caption=f"Описание товара:\n{description}",
                                  reply_markup=InlineKeyboardMarkup(keyboard))
             query.bot.delete_message(update.callback_query.from_user.id, update.callback_query.message.message_id)
-            host, port = get_host_port(context.user_data)
+            host = context.bot_data['host']
+            port = context.bot_data['port']
             db = get_database_connection(host, port)
-            db.set(str(update.callback_query.from_user.id)*2, query.data)
+            db.set(f"PID{update.callback_query.from_user.id}", query.data)
             return "HANDLE_DESCRIPTION"
     except URLError:
         update.callback_query.message.reply_text('Нет фото')
@@ -322,21 +279,12 @@ def indicate_weight(update, context):
     tmpl = '^[1-9][0-9]*$'
     users_reply = update.message.text
     if re.match(tmpl, users_reply) is not None:
-        host, port = get_host_port(context.user_data)
+        host = context.bot_data['host']
+        port = context.bot_data['port']
         db = get_database_connection(host, port)
-        product_id = db.get(str(update.message.from_user.id) * 2).decode("utf-8")
+        product_id = db.get(f"PID{update.message.from_user.id}").decode("utf-8")
         try:
-            headers = {'Authorization': f'Bearer {strapi_token}'}
-            params = {
-                'data': {
-                    'product': product_id,
-                    'quantity': users_reply,
-                    'user_id': f"{update.message.from_user.id}",
-                }
-            }
-            response = requests.post(f'{strapi_url}/api/user-orders/',
-                                     headers=headers, json=params)
-            response.raise_for_status()
+            create_user_order_item(strapi_url, strapi_token, product_id, users_reply, update.message.from_user.id)
             update.message.reply_text("Позиция добавлена в корзину☑️\n👆Используйте меню выше для продолжения")
             return "HANDLE_DESCRIPTION"
         except Exception as err:
@@ -374,9 +322,12 @@ def handle_users_reply(update, context, host, port):
     }
     state_handler = states_functions[user_state]
     try:
-        context.user_data[str(port)] = host
+        payload = {
+                "host": host,
+                "port": port
+        }
+        context.bot_data.update(payload)
         next_state = state_handler(update, context)
-        logger.info("next_state "+next_state)
         db.set(chat_id, next_state)
     except requests.exceptions.ConnectionError:
         update.callback_query.message.reply_text("Нет соединения с БД. Магазин не работает 🤷‍♂️")
