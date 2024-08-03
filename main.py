@@ -27,8 +27,8 @@ def get_main_menu():
     return InlineKeyboardMarkup(keyboard)
 
 
-def get_products_menu():
-    products = get_products(strapi_url, strapi_token, '', False)
+def get_products_menu(url, token):
+    products = get_products(url, token, '', False)
     buttons = []
     for product in products['data']:
         buttons.append(
@@ -51,6 +51,8 @@ def get_user_phone(update: Update, context: CallbackContext) -> None:
     host = context.bot_data['host']
     port = context.bot_data['port']
     db = get_database_connection(host, port)
+    strapi_url = db.get("URL").decode("utf-8")
+    strapi_token = db.get("TOKEN").decode("utf-8")
     phone = update.message.text
     cart_id = db.get(f"CARTID{update.message.from_user.id}").decode("utf-8")
     user_mail = db.get(f"MAIL{update.message.from_user.id}").decode("utf-8")
@@ -81,6 +83,8 @@ def get_user_mail(update: Update, context: CallbackContext) -> None:
     host = context.bot_data['host']
     port = context.bot_data['port']
     db = get_database_connection(host, port)
+    strapi_url = db.get("URL").decode("utf-8")
+    strapi_token = db.get("TOKEN").decode("utf-8")
     address = update.message.text
     if address.lower() == "отмена":
         update.message.reply_text(f'Бот Магазин - "Рыба Моя"🐟', reply_markup=get_main_menu())
@@ -91,7 +95,7 @@ def get_user_mail(update: Update, context: CallbackContext) -> None:
         email_regex = re.compile(r"(^[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+$)")
         is_valid = email_regex.fullmatch(address)
         parsed_email = parseaddr(address)[1]
-        if (is_valid is not None and parsed_email == address):
+        if is_valid is not None and parsed_email == address:
             db.set(f"MAIL{update.message.from_user.id}", address)
             update.message.reply_text("Укажите ваш телефон")
             return "GET_PHONE"
@@ -103,6 +107,11 @@ def get_user_mail(update: Update, context: CallbackContext) -> None:
 def cart_choise_yes_no_button(update: Update, context: CallbackContext) -> None:
     query = update.callback_query
     query.answer()
+    host = context.bot_data['host']
+    port = context.bot_data['port']
+    db = get_database_connection(host, port)
+    strapi_url = db.get("URL").decode("utf-8")
+    strapi_token = db.get("TOKEN").decode("utf-8")
     if int(query.data) > 0:
         delete_order_item(strapi_url, strapi_token, query.data)
     query.bot.send_message(update.callback_query.from_user.id, f'Бот Магазин - "Рыба Моя"🐟', reply_markup=get_main_menu())
@@ -113,9 +122,14 @@ def cart_choise_yes_no_button(update: Update, context: CallbackContext) -> None:
 def product_choise_button(update: Update, context: CallbackContext) -> None:
     query = update.callback_query
     query.answer()
+    host = context.bot_data['host']
+    port = context.bot_data['port']
+    db = get_database_connection(host, port)
+    strapi_url = db.get("URL").decode("utf-8")
+    strapi_token = db.get("TOKEN").decode("utf-8")
     match query.data:
         case 'back':
-            query.bot.send_message(update.callback_query.from_user.id, 'Список товаров!', reply_markup=get_products_menu())
+            query.bot.send_message(update.callback_query.from_user.id, 'Список товаров!', reply_markup=get_products_menu(strapi_url, strapi_token))
             query.bot.delete_message(update.callback_query.from_user.id, update.callback_query.message.message_id)
             return "HANDLE_MENU"
         case 'main_menu':
@@ -130,6 +144,11 @@ def product_choise_button(update: Update, context: CallbackContext) -> None:
 def process_orders(update: Update, context: CallbackContext) -> None:
     query = update.callback_query
     query.answer()
+    host = context.bot_data['host']
+    port = context.bot_data['port']
+    db = get_database_connection(host, port)
+    strapi_url = db.get("URL").decode("utf-8")
+    strapi_token = db.get("TOKEN").decode("utf-8")
     if int(query.data) > 0:
         keyboard = [
             [
@@ -164,9 +183,6 @@ def process_orders(update: Update, context: CallbackContext) -> None:
                         }
                     }
                     update_cart(strapi_url, strapi_token, cart_id, data)
-                    host = context.bot_data['host']
-                    port = context.bot_data['port']
-                    db = get_database_connection(host, port)
                     db.set(f"CARTID{update.callback_query.from_user.id}", cart_id)
                     query.bot.send_message(update.callback_query.from_user.id, 'Укажите ваш Email 📩')
                     return "GET_MAIL"
@@ -187,15 +203,19 @@ def process_orders(update: Update, context: CallbackContext) -> None:
 def get_main_menu_button(update: Update, context: CallbackContext) -> None:
     query = update.callback_query
     query.answer()
+    host = context.bot_data['host']
+    port = context.bot_data['port']
+    db = get_database_connection(host, port)
+    strapi_url = db.get("URL").decode("utf-8")
+    strapi_token = db.get("TOKEN").decode("utf-8")
     match query.data:
         case 'product_list':
-            query.bot.send_message(update.callback_query.from_user.id, 'Список товаров!', reply_markup=get_products_menu())
+            query.bot.send_message(update.callback_query.from_user.id, 'Список товаров!', reply_markup=get_products_menu(strapi_url, strapi_token))
             query.bot.delete_message(update.callback_query.from_user.id, update.callback_query.message.message_id)
             return "HANDLE_MENU"
         case 'my_cart':
             query.bot.delete_message(update.callback_query.from_user.id, update.callback_query.message.message_id)
             orders = get_user_cart(strapi_url, strapi_token, update.callback_query.from_user.id)
-
             if orders:
                 buttons = []
                 order_price = 0
@@ -224,7 +244,6 @@ def get_main_menu_button(update: Update, context: CallbackContext) -> None:
                 query.bot.send_message(update.callback_query.from_user.id,
                                        f'Корзина пуста 🤷\nИспользуйте список товаров', reply_markup=get_main_menu())
             return "START_MENU"
-
         case 'clear_cart':
             clear_user_orders(strapi_url, strapi_token, update.callback_query.from_user.id)
             query.bot.send_message(update.callback_query.from_user.id, f'Корзина пуста 🤷\nИспользуйте список товаров')
@@ -238,6 +257,11 @@ def get_main_menu_button(update: Update, context: CallbackContext) -> None:
 def get_product_button(update: Update, context: CallbackContext) -> None:
     query = update.callback_query
     query.answer()
+    host = context.bot_data['host']
+    port = context.bot_data['port']
+    db = get_database_connection(host, port)
+    strapi_url = db.get("URL").decode("utf-8")
+    strapi_token = db.get("TOKEN").decode("utf-8")
     try:
         if query.data == '0':
             query.bot.send_message(update.callback_query.from_user.id, f'Бот Магазин - "Рыба Моя"🐟',
@@ -263,9 +287,6 @@ def get_product_button(update: Update, context: CallbackContext) -> None:
                                  caption=f"Описание товара:\n{description}",
                                  reply_markup=InlineKeyboardMarkup(keyboard))
             query.bot.delete_message(update.callback_query.from_user.id, update.callback_query.message.message_id)
-            host = context.bot_data['host']
-            port = context.bot_data['port']
-            db = get_database_connection(host, port)
             db.set(f"PID{update.callback_query.from_user.id}", query.data)
             return "HANDLE_DESCRIPTION"
     except URLError:
@@ -283,6 +304,8 @@ def indicate_weight(update, context):
         host = context.bot_data['host']
         port = context.bot_data['port']
         db = get_database_connection(host, port)
+        strapi_url = db.get("URL").decode("utf-8")
+        strapi_token = db.get("TOKEN").decode("utf-8")
         product_id = db.get(f"PID{update.message.from_user.id}").decode("utf-8")
         try:
             create_user_order_item(strapi_url, strapi_token, product_id, users_reply, update.message.from_user.id)
@@ -343,16 +366,14 @@ def get_database_connection(database_host, database_port):
     return _database
 
 
-if __name__ == '__main__':
-    logging.basicConfig(
-        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO
-    )
+def main():
     env = Env()
     env.read_env()
     host = env('REDIS_HOST')
     port = env('REDIS_PORT')
-    strapi_token = env.str("STRAPI_TOKEN")
-    strapi_url = env.str("STRAPI_URL")
+    db = get_database_connection(host, port)
+    db.set(f"TOKEN", env.str("STRAPI_TOKEN"))
+    db.set(f"URL", env.str("STRAPI_URL"))
     token = env.str("TELEGRAM_TOKEN")
     updater = Updater(token)
     dispatcher = updater.dispatcher
@@ -361,3 +382,10 @@ if __name__ == '__main__':
     dispatcher.add_handler(CommandHandler('start', partial(handle_users_reply, host=host, port=port)))
     updater.start_polling()
     updater.idle()
+
+
+if __name__ == '__main__':
+    logging.basicConfig(
+        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO
+    )
+    main()
