@@ -28,7 +28,7 @@ def get_main_menu():
 
 
 def get_products_menu():
-    products = get_products(strapi_url, strapi_token)
+    products = get_products(strapi_url, strapi_token, '', False)
     buttons = []
     for product in products['data']:
         buttons.append(
@@ -53,7 +53,7 @@ def get_user_phone(update: Update, context: CallbackContext) -> None:
     db = get_database_connection(host, port)
     phone = update.message.text
     cart_id = db.get(f"CARTID{update.message.from_user.id}").decode("utf-8")
-    user_mail = db.get(f"{update.message.from_user.id}-3").decode("utf-8")
+    user_mail = db.get(f"MAIL{update.message.from_user.id}").decode("utf-8")
     if phone.lower() == "отмена":
         update.message.reply_text(f'Бот Магазин - "Рыба Моя"🐟', reply_markup=get_main_menu())
         delete_cart_by_id(strapi_url, strapi_token, cart_id)
@@ -92,7 +92,7 @@ def get_user_mail(update: Update, context: CallbackContext) -> None:
         is_valid = email_regex.fullmatch(address)
         parsed_email = parseaddr(address)[1]
         if (is_valid is not None and parsed_email == address):
-            db.set(f"{update.message.from_user.id}-3", address)
+            db.set(f"MAIL{update.message.from_user.id}", address)
             update.message.reply_text("Укажите ваш телефон")
             return "GET_PHONE"
         else:
@@ -250,6 +250,7 @@ def get_product_button(update: Update, context: CallbackContext) -> None:
                           product_title['data']['attributes']['Picture']['data'][0]['attributes']['url']
             description = product_title['data']['attributes']['Description']
             response = requests.get(picture_url)
+            response.raise_for_status()
             image_data = BytesIO(response.content)
             keyboard = [
                 [
