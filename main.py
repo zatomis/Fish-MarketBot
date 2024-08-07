@@ -5,7 +5,6 @@ import requests
 from email.utils import parseaddr
 from environs import Env
 import redis
-from functools import partial
 import logging
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import Filters, Updater, CommandHandler, CallbackQueryHandler, CallbackContext, MessageHandler
@@ -50,9 +49,9 @@ def start(update: Update, context: CallbackContext):
 def get_user_phone(update: Update, context: CallbackContext) -> None:
     host = context.bot_data['host']
     port = context.bot_data['port']
+    strapi_url = context.bot_data['url']
+    strapi_token = context.bot_data['token']
     db = get_database_connection(host, port)
-    strapi_url = db.get("URL").decode("utf-8")
-    strapi_token = db.get("TOKEN").decode("utf-8")
     phone = update.message.text
     cart_id = db.get(f"CARTID{update.message.from_user.id}").decode("utf-8")
     user_mail = db.get(f"MAIL{update.message.from_user.id}").decode("utf-8")
@@ -82,9 +81,9 @@ def get_user_phone(update: Update, context: CallbackContext) -> None:
 def get_user_mail(update: Update, context: CallbackContext) -> None:
     host = context.bot_data['host']
     port = context.bot_data['port']
+    strapi_url = context.bot_data['url']
+    strapi_token = context.bot_data['token']
     db = get_database_connection(host, port)
-    strapi_url = db.get("URL").decode("utf-8")
-    strapi_token = db.get("TOKEN").decode("utf-8")
     address = update.message.text
     if address.lower() == "отмена":
         update.message.reply_text(f'Бот Магазин - "Рыба Моя"🐟', reply_markup=get_main_menu())
@@ -107,30 +106,28 @@ def get_user_mail(update: Update, context: CallbackContext) -> None:
 def cart_choise_yes_no_button(update: Update, context: CallbackContext) -> None:
     query = update.callback_query
     query.answer()
-    host = context.bot_data['host']
-    port = context.bot_data['port']
-    db = get_database_connection(host, port)
-    strapi_url = db.get("URL").decode("utf-8")
-    strapi_token = db.get("TOKEN").decode("utf-8")
+    strapi_url = context.bot_data['url']
+    strapi_token = context.bot_data['token']
     if int(query.data) > 0:
         delete_order_item(strapi_url, strapi_token, query.data)
-    query.bot.send_message(update.callback_query.from_user.id, f'Бот Магазин - "Рыба Моя"🐟', reply_markup=get_main_menu())
-    query.bot.delete_message(update.callback_query.from_user.id, update.callback_query.message.message_id)
+    query.bot.send_message(update.callback_query.from_user.id, f'Бот Магазин - "Рыба Моя"🐟',
+                           reply_markup=get_main_menu())
+    query.bot.delete_message(update.callback_query.from_user.id,
+                             update.callback_query.message.message_id)
     return "START_MENU"
 
 
 def product_choise_button(update: Update, context: CallbackContext) -> None:
     query = update.callback_query
     query.answer()
-    host = context.bot_data['host']
-    port = context.bot_data['port']
-    db = get_database_connection(host, port)
-    strapi_url = db.get("URL").decode("utf-8")
-    strapi_token = db.get("TOKEN").decode("utf-8")
+    strapi_url = context.bot_data['url']
+    strapi_token = context.bot_data['token']
     match query.data:
         case 'back':
-            query.bot.send_message(update.callback_query.from_user.id, 'Список товаров!', reply_markup=get_products_menu(strapi_url, strapi_token))
-            query.bot.delete_message(update.callback_query.from_user.id, update.callback_query.message.message_id)
+            query.bot.send_message(update.callback_query.from_user.id, 'Список товаров!',
+                                   reply_markup=get_products_menu(strapi_url, strapi_token))
+            query.bot.delete_message(update.callback_query.from_user.id,
+                                     update.callback_query.message.message_id)
             return "HANDLE_MENU"
         case 'main_menu':
             query.bot.send_message(update.callback_query.from_user.id, 'Главное меню', reply_markup=get_main_menu())
@@ -146,9 +143,9 @@ def process_orders(update: Update, context: CallbackContext) -> None:
     query.answer()
     host = context.bot_data['host']
     port = context.bot_data['port']
+    strapi_url = context.bot_data['url']
+    strapi_token = context.bot_data['token']
     db = get_database_connection(host, port)
-    strapi_url = db.get("URL").decode("utf-8")
-    strapi_token = db.get("TOKEN").decode("utf-8")
     if int(query.data) > 0:
         keyboard = [
             [
@@ -203,15 +200,14 @@ def process_orders(update: Update, context: CallbackContext) -> None:
 def get_main_menu_button(update: Update, context: CallbackContext) -> None:
     query = update.callback_query
     query.answer()
-    host = context.bot_data['host']
-    port = context.bot_data['port']
-    db = get_database_connection(host, port)
-    strapi_url = db.get("URL").decode("utf-8")
-    strapi_token = db.get("TOKEN").decode("utf-8")
+    strapi_url = context.bot_data['url']
+    strapi_token = context.bot_data['token']
     match query.data:
         case 'product_list':
-            query.bot.send_message(update.callback_query.from_user.id, 'Список товаров!', reply_markup=get_products_menu(strapi_url, strapi_token))
-            query.bot.delete_message(update.callback_query.from_user.id, update.callback_query.message.message_id)
+            query.bot.send_message(update.callback_query.from_user.id, 'Список товаров!',
+                                   reply_markup=get_products_menu(strapi_url, strapi_token))
+            query.bot.delete_message(update.callback_query.from_user.id,
+                                     update.callback_query.message.message_id)
             return "HANDLE_MENU"
         case 'my_cart':
             query.bot.delete_message(update.callback_query.from_user.id, update.callback_query.message.message_id)
@@ -250,6 +246,7 @@ def get_main_menu_button(update: Update, context: CallbackContext) -> None:
             return "START_MENU"
 
         case 'about':
+
             query.bot.send_message(update.callback_query.from_user.id, f'Хороший магазин...')
             return "START_MENU"
 
@@ -259,9 +256,9 @@ def get_product_button(update: Update, context: CallbackContext) -> None:
     query.answer()
     host = context.bot_data['host']
     port = context.bot_data['port']
+    strapi_url = context.bot_data['url']
+    strapi_token = context.bot_data['token']
     db = get_database_connection(host, port)
-    strapi_url = db.get("URL").decode("utf-8")
-    strapi_token = db.get("TOKEN").decode("utf-8")
     try:
         if query.data == '0':
             query.bot.send_message(update.callback_query.from_user.id, f'Бот Магазин - "Рыба Моя"🐟',
@@ -303,9 +300,9 @@ def indicate_weight(update, context):
     if re.match(tmpl, users_reply) is not None:
         host = context.bot_data['host']
         port = context.bot_data['port']
+        strapi_url = context.bot_data['url']
+        strapi_token = context.bot_data['token']
         db = get_database_connection(host, port)
-        strapi_url = db.get("URL").decode("utf-8")
-        strapi_token = db.get("TOKEN").decode("utf-8")
         product_id = db.get(f"PID{update.message.from_user.id}").decode("utf-8")
         try:
             create_user_order_item(strapi_url, strapi_token, product_id, users_reply, update.message.from_user.id)
@@ -318,7 +315,9 @@ def indicate_weight(update, context):
         return "ECHO"
 
 
-def handle_users_reply(update, context, host, port):
+def handle_users_reply(update, context):
+    host = context.bot_data['host']
+    port = context.bot_data['port']
     db = get_database_connection(host, port)
     if update.message:
         user_reply = update.message.text
@@ -346,11 +345,6 @@ def handle_users_reply(update, context, host, port):
     }
     state_handler = states_functions[user_state]
     try:
-        payload = {
-                "host": host,
-                "port": port
-        }
-        context.bot_data.update(payload)
         next_state = state_handler(update, context)
         db.set(chat_id, next_state)
     except requests.exceptions.ConnectionError:
@@ -367,25 +361,25 @@ def get_database_connection(database_host, database_port):
 
 
 def main():
+    logging.basicConfig(
+        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO
+    )
     env = Env()
     env.read_env()
-    host = env('REDIS_HOST')
-    port = env('REDIS_PORT')
-    db = get_database_connection(host, port)
-    db.set(f"TOKEN", env.str("STRAPI_TOKEN"))
-    db.set(f"URL", env.str("STRAPI_URL"))
     token = env.str("TELEGRAM_TOKEN")
     updater = Updater(token)
     dispatcher = updater.dispatcher
-    dispatcher.add_handler(CallbackQueryHandler(partial(handle_users_reply, host=host, port=port)))
-    dispatcher.add_handler(MessageHandler(Filters.text, partial(handle_users_reply, host=host, port=port)))
-    dispatcher.add_handler(CommandHandler('start', partial(handle_users_reply, host=host, port=port)))
+    bot_data = dispatcher.bot_data
+    bot_data['host'] = env.str("REDIS_HOST")
+    bot_data['port'] = env.str("REDIS_PORT")
+    bot_data['token'] = env.str("STRAPI_TOKEN")
+    bot_data['url'] = env.str("STRAPI_URL")
+    dispatcher.add_handler(CallbackQueryHandler(handle_users_reply))
+    dispatcher.add_handler(MessageHandler(Filters.text, handle_users_reply))
+    dispatcher.add_handler(CommandHandler('start', handle_users_reply))
     updater.start_polling()
     updater.idle()
 
 
 if __name__ == '__main__':
-    logging.basicConfig(
-        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO
-    )
     main()
